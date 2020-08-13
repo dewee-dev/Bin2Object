@@ -135,125 +135,188 @@ namespace NoisyCowStudios.Bin2Object
             }
         }
 
-        public T ReadObject<T>() where T : new() {
-            var type = typeof(T);
-            var ti = type.GetTypeInfo();
-
-            if (ti.IsPrimitive) {
-                // Checked for mapped primitive types
-                if ((from m in PrimitiveMappings where m.Key.GetTypeInfo().Name == type.Name select m.Value).FirstOrDefault() is Type mapping) {
-                    var mappedReader = (from m in GetType().GetMethods() where m.Name.StartsWith("Read") && m.ReturnType == mapping && !m.GetParameters().Any() select m).FirstOrDefault();
-                    return (T) Convert.ChangeType(mappedReader?.Invoke(this, null), typeof(T));
+               public T ReadObject<T>() where T : new()
+        {
+            Type type = typeof(T);
+            if (type.GetTypeInfo().IsPrimitive)
+            {
+                Type mapping2 = Enumerable.FirstOrDefault(Enumerable.Select(Enumerable.Where(PrimitiveMappings, delegate (KeyValuePair<Type, Type> m)
+                {
+                    KeyValuePair<Type, Type> keyValuePair4 = m;
+                    return keyValuePair4.Key.GetTypeInfo().Name == type.Name;
+                }), delegate (KeyValuePair<Type, Type> m)
+                {
+                    KeyValuePair<Type, Type> keyValuePair3 = m;
+                    return keyValuePair3.Value;
+                }));
+                if ((object)mapping2 != null)
+                {
+                    return (T)Convert.ChangeType(Enumerable.FirstOrDefault(Enumerable.Where(GetType().GetMethods(), (MethodInfo m) => m.Name.StartsWith("Read") && m.ReturnType == mapping2 && !Enumerable.Any(m.GetParameters())))?.Invoke(this, null), typeof(T));
                 }
-
-                // Unmapped primitive (eliminating obj causes Visual Studio 16.3.5 to crash)
-                object obj = type.Name switch {
-                    "Int64" => ReadInt64(),
-                    "UInt64" => ReadUInt64(),
-                    "Int32" => ReadInt32(),
-                    "UInt32" => ReadUInt32(),
-                    "Int16" => ReadInt16(),
-                    "UInt16" => ReadUInt16(),
-                    "Byte" => ReadByte(),
-                    "Boolean" => ReadBoolean(),
-                    _ => throw new ArgumentException("Unsupported primitive type specified: " + type.FullName)
-                };
-				return (T) obj;
-			}
-
-            var t = new T();
-
-            // First time caching
-            if (!readObjectVersionCache.TryGetValue(type, out var cachedFields)) {
-                var fields = new Dictionary<FieldInfo, (double, double)>();
-                foreach (var i in type.GetFields())
-                    if (i.GetCustomAttribute<VersionAttribute>(false) is VersionAttribute versionAttr)
-                        fields.Add(i, (versionAttr.Min, versionAttr.Max));
+                object obj;
+                switch (type.Name)
+                {
+                    case "Int64":
+                        obj = ReadInt64();
+                        break;
+                    case "UInt64":
+                        obj = ReadUInt64();
+                        break;
+                    case "Int32":
+                        obj = ReadInt32();
+                        break;
+                    case "UInt32":
+                        obj = ReadUInt32();
+                        break;
+                    case "Int16":
+                        obj = ReadInt16();
+                        break;
+                    case "UInt16":
+                        obj = ReadUInt16();
+                        break;
+                    case "Byte":
+                        obj = ReadByte();
+                        break;
+                    case "Boolean":
+                        obj = ReadBoolean();
+                        break;
+                    default:
+                        throw new ArgumentException("Unsupported primitive type specified: " + type.FullName);
+                }
+                return (T)obj;
+            }
+            T val = new T();
+            if (!readObjectVersionCache.TryGetValue(type, out Dictionary<FieldInfo, (double, double)> _))
+            {
+                Dictionary<FieldInfo, (double, double)> dictionary = new Dictionary<FieldInfo, (double, double)>();
+                FieldInfo[] fields = type.GetFields();
+                foreach (FieldInfo fieldInfo in fields)
+                {
+                    VersionAttribute customAttribute = fieldInfo.GetCustomAttribute<VersionAttribute>(inherit: false);
+                    if (customAttribute != null)
+                    {
+                        dictionary.Add(fieldInfo, (customAttribute.Min, customAttribute.Max));
+                    }
                     else
-                        fields.Add(i, (-1, -1));
-                readObjectVersionCache.Add(type, fields);
+                    {
+                        dictionary.Add(fieldInfo, (-1.0, -1.0));
+                    }
+                }
+                readObjectVersionCache.Add(type, dictionary);
             }
-
-            foreach (var (i, version) in readObjectVersionCache[type]) {
-                // Only process fields for our selected object versioning
-                if (version.Min != -1 && version.Min > Version)
-                    continue;
-                if (version.Max != -1 && version.Max < Version)
-                    continue;
-
-                // String
-                if (i.FieldType == typeof(string)) {
-                    var attr = i.GetCustomAttribute<StringAttribute>(false);
-
-                    // No String attribute? Use a null-terminated string by default
-                    if (attr == null || attr.IsNullTerminated)
-                        i.SetValue(t, ReadNullTerminatedString());
-                    else {
-                        if (attr.FixedSize <= 0)
-                            throw new ArgumentException("String attribute for array field " + i.Name + " configuration invalid");
-                        i.SetValue(t, ReadFixedLengthString(attr.FixedSize));
+            foreach (KeyValuePair<FieldInfo, (double, double)> item in readObjectVersionCache[type])
+            {
+                item.Deconstruct(out FieldInfo key, out (double, double) value2);
+                FieldInfo i = key;
+                (double, double) valueTuple = value2;
+                if ((valueTuple.Item1 == -1.0 || !(valueTuple.Item1 > Version)) && (valueTuple.Item2 == -1.0 || !(valueTuple.Item2 < Version)))
+                {
+                    if (i.FieldType == typeof(string))
+                    {
+                        StringAttribute customAttribute2 = i.GetCustomAttribute<StringAttribute>(inherit: false);
+                        if (customAttribute2 == null || customAttribute2.IsNullTerminated)
+                        {
+                            i.SetValue(val, ReadNullTerminatedString());
+                        }
+                        else
+                        {
+                            if (customAttribute2.FixedSize <= 0)
+                            {
+                                throw new ArgumentException("String attribute for array field " + i.Name + " configuration invalid");
+                            }
+                            i.SetValue(val, ReadFixedLengthString(customAttribute2.FixedSize));
+                        }
                     }
-                }
-
-                // Array
-                else if (i.FieldType.IsArray) {
-                    var attr = i.GetCustomAttribute<ArrayLengthAttribute>(false) ??
-                        throw new InvalidOperationException("Array field " + i.Name + " must have ArrayLength attribute");
-
-                    int lengthPrimitive;
-
-                    if (attr.FieldName != null) {
-                        var field = type.GetField(attr.FieldName) ??
-                            throw new ArgumentException("Array field " + i.Name + " has invalid FieldName in ArrayLength attribute");
-                        lengthPrimitive = Convert.ToInt32(field.GetValue(t));
+                    else if (i.FieldType.IsArray)
+                    {
+                        ArrayLengthAttribute arrayLengthAttribute = i.GetCustomAttribute<ArrayLengthAttribute>(inherit: false) ?? throw new InvalidOperationException("Array field " + i.Name + " must have ArrayLength attribute");
+                        int num;
+                        if (arrayLengthAttribute.FieldName != null)
+                        {
+                            num = Convert.ToInt32((type.GetField(arrayLengthAttribute.FieldName) ?? throw new ArgumentException("Array field " + i.Name + " has invalid FieldName in ArrayLength attribute"))!.GetValue(val));
+                        }
+                        else
+                        {
+                            if (arrayLengthAttribute.FixedSize <= 0)
+                            {
+                                throw new ArgumentException("ArrayLength attribute for array field " + i.Name + " configuration invalid");
+                            }
+                            num = arrayLengthAttribute.FixedSize;
+                        }
+                        MethodInfo methodInfo = GetType().GetMethod("ReadArray", new Type[1]
+                        {
+                    typeof(int)
+                        })!.MakeGenericMethod(i.FieldType.GetElementType());
+                        i.SetValue(val, methodInfo.Invoke(this, new object[1]
+                        {
+                    num
+                        }));
                     }
-                    else if (attr.FixedSize > 0) {
-                        lengthPrimitive = attr.FixedSize;
+                    else if (i.FieldType.IsPrimitive)
+                    {
+                        Type mapping = Enumerable.FirstOrDefault(Enumerable.Select(Enumerable.Where(PrimitiveMappings, delegate (KeyValuePair<Type, Type> m)
+                        {
+                            KeyValuePair<Type, Type> keyValuePair2 = m;
+                            return keyValuePair2.Key.GetTypeInfo().Name == i.FieldType.Name;
+                        }), delegate (KeyValuePair<Type, Type> m)
+                        {
+                            KeyValuePair<Type, Type> keyValuePair = m;
+                            return keyValuePair.Value;
+                        }));
+                        if ((object)mapping != null)
+                        {
+                            MethodInfo methodInfo2 = Enumerable.FirstOrDefault(Enumerable.Where(GetType().GetMethods(), (MethodInfo m) => m.Name.StartsWith("Read") && m.ReturnType == mapping && !Enumerable.Any(m.GetParameters())));
+                            i.SetValue(val, methodInfo2?.Invoke(this, null));
+                        }
+                        else
+                        {
+                            key = i;
+                            object obj = val;
+                            object value3;
+                            switch (i.FieldType.Name)
+                            {
+                                case "Int64":
+                                    value3 = ReadInt64();
+                                    break;
+                                case "UInt64":
+                                    value3 = ReadUInt64();
+                                    break;
+                                case "Int32":
+                                    value3 = ReadInt32();
+                                    break;
+                                case "UInt32":
+                                    value3 = ReadUInt32();
+                                    break;
+                                case "Int16":
+                                    value3 = ReadInt16();
+                                    break;
+                                case "UInt16":
+                                    value3 = ReadUInt16();
+                                    break;
+                                case "Byte":
+                                    value3 = ReadByte();
+                                    break;
+                                case "Boolean":
+                                    value3 = ReadBoolean();
+                                    break;
+                                default:
+                                    throw new ArgumentException("Unsupported primitive type specified: " + i.FieldType.FullName);
+                            }
+                            key.SetValue(obj, value3);
+                        }
                     }
-                    else {
-                        throw new ArgumentException("ArrayLength attribute for array field " + i.Name + " configuration invalid");
+                    else
+                    {
+                        if (!readObjectGenericCache.TryGetValue(i.FieldType.FullName, out MethodInfo value4))
+                        {
+                            value4 = GetType().GetMethod("ReadObject", Type.EmptyTypes)!.MakeGenericMethod(i.FieldType);
+                            readObjectGenericCache.Add(i.FieldType.FullName, value4);
+                        }
+                        i.SetValue(val, value4.Invoke(this, null));
                     }
-
-                    var us = GetType().GetMethod("ReadArray", new[] {typeof(int)});
-                    var mi2 = us.MakeGenericMethod(i.FieldType.GetElementType());
-                    i.SetValue(t, mi2.Invoke(this, new object[] { lengthPrimitive }));
-                }
-
-                // Primitive type
-                // This is unnecessary but saves on many generic Invoke calls which are really slow
-                else if (i.FieldType.IsPrimitive) {
-                    // Checked for mapped primitive types
-                    if ((from m in PrimitiveMappings where m.Key.GetTypeInfo().Name == i.FieldType.Name select m.Value).FirstOrDefault() is Type mapping) {
-                        var mappedReader = (from m in GetType().GetMethods() where m.Name.StartsWith("Read") && m.ReturnType == mapping && !m.GetParameters().Any() select m).FirstOrDefault();
-                        i.SetValue(t, mappedReader?.Invoke(this, null));
-                    }
-                    else {
-                        // Unmapped primitive type
-                        i.SetValue(t, i.FieldType.Name switch {
-                            "Int64" => ReadInt64(),
-                            "UInt64" => ReadUInt64(),
-                            "Int32" => ReadInt32(),
-                            "UInt32" => ReadUInt32(),
-                            "Int16" => ReadInt16(),
-                            "UInt16" => ReadUInt16(),
-                            "Byte" => ReadByte(),
-                            "Boolean" => ReadBoolean(),
-                            _ => throw new ArgumentException("Unsupported primitive type specified: " + i.FieldType.FullName)
-                        });
-                    }
-                }
-
-                // Object
-                else {
-                    if (!readObjectGenericCache.TryGetValue(i.FieldType.FullName, out MethodInfo mi2)) {
-                        var us = GetType().GetMethod("ReadObject", Type.EmptyTypes);
-                        mi2 = us.MakeGenericMethod(i.FieldType);
-                        readObjectGenericCache.Add(i.FieldType.FullName, mi2);
-                    }
-                    i.SetValue(t, mi2.Invoke(this, null));
                 }
             }
-            return t;
+            return val;
         }
 
         public T[] ReadArray<T>(long addr, int count) where T : new() {
